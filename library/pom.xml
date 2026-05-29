@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.flowgate</groupId>
+        <artifactId>flowgate</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>flowgate-library</artifactId>
+    <name>flowgate-library</name>
+    <description>
+        Spring Boot autoconfiguration library.
+        Add this JAR to any Spring Boot project and use @RateLimit on any method
+        to get distributed rate limiting with zero boilerplate configuration.
+    </description>
+
+    <dependencies>
+        <!-- All rate limiting logic lives in core; the library just wires Spring around it -->
+        <dependency>
+            <groupId>com.flowgate</groupId>
+            <artifactId>flowgate-core</artifactId>
+        </dependency>
+
+        <!--
+            spring-boot-autoconfigure, NOT spring-boot-starter.
+            A library should never pull in opinionated starters (logging, banner, etc.)
+            that belong to the consuming application. The autoconfigure artifact gives
+            us @AutoConfiguration, @ConditionalOn*, and @ConfigurationProperties support
+            without the opinionated defaults.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-autoconfigure</artifactId>
+        </dependency>
+
+        <!--
+            AOP support: AspectJ weaver for @RateLimit method interception.
+            Using spring-boot-starter-aop pulls in the right AspectJ version.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-aop</artifactId>
+        </dependency>
+
+        <!-- RedisTemplate and connection factory for distributed counter access -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+
+        <!--
+            Generates spring-configuration-metadata.json at compile time so IDEs
+            autocomplete flowgate.* properties in application.yml.
+            Marked optional: not shipped as a transitive dependency to consumers.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-configuration-processor</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- ─── Test ──────────────────────────────────────────────────── -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

@@ -1,0 +1,32 @@
+# Maven build output
+target/
+
+# Java artifacts
+*.class
+*.jar
+!.mvn/wrapper/*.jar
+*.war
+*.ear
+
+# IDE files
+.idea/
+*.iml
+.vscode/
+.settings/
+.project
+.classpath
+*.factorypath
+
+# Environment and secrets — NEVER commit these
+.env
+*.env.local
+application-local.yml
+application-secrets.yml
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db

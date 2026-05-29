@@ -1,0 +1,11 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'flowgate-service'
+    metrics_path: '/actuator/prometheus'      # exposed by Spring Boot Actuator
+    static_configs:
+      # host.docker.internal resolves to your laptop from inside Docker.
+      # On Linux, replace with your machine's LAN IP if this doesn't resolve.
+      - targets: ['host.docker.internal:8080']

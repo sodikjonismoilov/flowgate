@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.flowgate</groupId>
+        <artifactId>flowgate</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>flowgate-core</artifactId>
+    <name>flowgate-core</name>
+    <description>
+        Pure Java rate limiting algorithm implementations.
+        No Spring dependency — this JAR can be embedded in any JVM application,
+        not just Spring Boot apps. All four algorithms share the RateLimiter interface.
+    </description>
+
+    <dependencies>
+        <!--
+            Lettuce: async, thread-safe Redis client.
+            Lives in core (not just service/library) because core owns the Redis-backed
+            algorithm implementations via Lua scripts — the distributed half of this project.
+            Version is managed by the Spring Boot BOM from the parent.
+
+            Why Lettuce over Jedis?
+            - Lettuce uses Netty under the hood: single connection, non-blocking I/O.
+            - Jedis is synchronous and uses connection pools — one thread per connection.
+            - Spring Data Redis defaults to Lettuce for this reason.
+            This decision goes in the README Engineering Decisions section.
+        -->
+        <dependency>
+            <groupId>io.lettuce</groupId>
+            <artifactId>lettuce-core</artifactId>
+        </dependency>
+
+        <!-- ─── Test ──────────────────────────────────────────────────── -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!--
+            Testcontainers spins up a real Redis Docker container for integration tests.
+            This is critical — you cannot meaningfully test Lua script atomicity
+            against a mock. Real Redis, real behavior.
+        -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

@@ -1,0 +1,58 @@
+version: '3.9'
+
+# Default: only Redis — what you need for local development in Weeks 1-5.
+# Full observability stack: docker-compose --profile observability up
+services:
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: flowgate-redis
+    ports:
+      - "6379:6379"                           # expose to host so your app can reach it
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis_data:/data                      # persist data across container restarts
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # ---- Week 7: Observability stack ----
+  # Start alongside Redis with: docker-compose --profile observability up
+
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    container_name: flowgate-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+    profiles:
+      - observability
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: flowgate-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=flowgate   # override in production via secrets
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    profiles:
+      - observability
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+  grafana_data:

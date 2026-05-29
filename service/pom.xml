@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.flowgate</groupId>
+        <artifactId>flowgate</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>flowgate-service</artifactId>
+    <name>flowgate-service</name>
+    <description>
+        Standalone HTTP (and later gRPC) server exposing rate limiting as a network service.
+        For polyglot architectures where embedding a JVM library is not possible.
+    </description>
+
+    <dependencies>
+        <!-- Core algorithm implementations — the actual rate limiting logic -->
+        <dependency>
+            <groupId>com.flowgate</groupId>
+            <artifactId>flowgate-core</artifactId>
+        </dependency>
+
+        <!-- Embedded Tomcat + Spring MVC for the POST /check endpoint -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+
+        <!-- RedisTemplate for distributed algorithm state -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+
+        <!-- /actuator/health, /actuator/info, /actuator/prometheus endpoints -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <!-- Exposes JVM, HTTP, and custom rate-limit counters to Prometheus -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
+        <!--
+            TODO (Week 5): JWT auth for the service itself
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
+            </dependency>
+        -->
+
+        <!--
+            TODO (Week 5): gRPC endpoint alongside REST
+            <dependency>
+                <groupId>net.devh</groupId>
+                <artifactId>grpc-server-spring-boot-starter</artifactId>
+                <version>2.15.0.RELEASE</version>
+            </dependency>
+        -->
+
+        <!-- ─── Test ──────────────────────────────────────────────────── -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!--
+                Repackages the compiled JAR into an executable fat JAR containing
+                all dependencies. Without this, running `java -jar flowgate-service.jar`
+                would fail with ClassNotFoundException because dependencies wouldn't be
+                on the classpath. The library and core modules do NOT use this plugin —
+                only the runnable service needs it.
+            -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>

@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!--
+        Using spring-boot-starter-parent gives us managed versions for the entire
+        Spring ecosystem, Testcontainers, Jackson, Micrometer, Lettuce, and more.
+        Child modules declare a dependency by name only — the version comes from here.
+        Check https://spring.io/projects/spring-boot for the latest stable version.
+    -->
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.3.0</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>com.flowgate</groupId>
+    <artifactId>flowgate</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+
+    <name>flowgate</name>
+    <description>Distributed Rate Limiter — embeddable Java library and standalone service</description>
+    <url>https://github.com/YOUR_USERNAME/flowgate</url>
+
+    <!--
+        core, library, and service are always part of the build.
+        benchmark is excluded by default because the maven-shade-plugin that JMH
+        requires is slow. Activate it with: mvn clean package -Pbenchmarks -DskipTests
+    -->
+    <modules>
+        <module>core</module>
+        <module>library</module>
+        <module>service</module>
+    </modules>
+
+    <profiles>
+        <profile>
+            <id>benchmarks</id>
+            <modules>
+                <module>benchmark</module>
+            </modules>
+        </profile>
+    </profiles>
+
+    <properties>
+        <java.version>21</java.version>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <!--
+            JMH is not covered by the Spring Boot BOM, so we manage its version here.
+            All other dependency versions come from the parent BOM automatically.
+        -->
+        <jmh.version>1.37</jmh.version>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <!--
+                Internal cross-module references.
+                Declaring them here means each child module can write
+                  <artifactId>flowgate-core</artifactId>
+                without repeating the version. Maven resolves it from here.
+            -->
+            <dependency>
+                <groupId>com.flowgate</groupId>
+                <artifactId>flowgate-core</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.flowgate</groupId>
+                <artifactId>flowgate-library</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <!-- JMH benchmark harness — not in the Spring Boot BOM -->
+            <dependency>
+                <groupId>org.openjdk.jmh</groupId>
+                <artifactId>jmh-core</artifactId>
+                <version>${jmh.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.openjdk.jmh</groupId>
+                <artifactId>jmh-generator-annproc</artifactId>
+                <version>${jmh.version}</version>
+                <scope>provided</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+</project>
