@@ -41,15 +41,15 @@ import java.time.Duration;
         assertThat(result.remaining()).isEqualTo(0);
     }
 
-    @Test
-    void shouldRefillTokensOverTime() {
-        long[] fakeTime = { 0L };
-        TokenBucketRateLimiter limiter = new TokenBucketRateLimiter(config, () -> fakeTime[0]);
+     @Test
+     void shouldRefillTokensOverTime() {
+         long[] fakeTime = { 0L };
+         TokenBucketRateLimiter limiter = new TokenBucketRateLimiter(config, () -> fakeTime[0]);
 
-        // drain the bucket
-        for (int i = 0; i < 20; i++) {
-            limiter.tryAcquire("user:1");
-        }
+         // drain the bucket (burst capacity is 20, so we need 20 requests)
+         for (int i = 0; i < 20; i++) {
+             limiter.tryAcquire("user:1");
+         }
 
         // advance time by 1 full minute
         fakeTime[0] += Duration.ofMinutes(1).toNanos();
