@@ -156,7 +156,7 @@ Sliding Window Counter  TBD                    TBD
 ## Roadmap
 
 - [X] **Week 1** — Token Bucket, in-memory, with unit tests
-- [ ] **Week 2** — All four algorithms, in-memory, common `RateLimiter` interface
+- [X] **Week 2** — All four algorithms, in-memory, common `RateLimiter` interface
 - [ ] **Week 3** — Redis backend + atomic Lua scripts + Testcontainers integration tests
 - [ ] **Week 4** — Spring Boot library (`@RateLimit` annotation + AOP aspect)
 - [ ] **Week 5** — Standalone gRPC service + REST fallback
