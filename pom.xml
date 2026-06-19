@@ -18,6 +18,7 @@
         <relativePath/>
     </parent>
 
+
     <groupId>com.flowgate</groupId>
     <artifactId>flowgate</artifactId>
     <version>1.0.0-SNAPSHOT</version>
@@ -28,6 +29,7 @@
     <url>https://github.com/YOUR_USERNAME/flowgate</url>
 
     <!--
+
         core, library, and service are always part of the build.
         benchmark is excluded by default because the maven-shade-plugin that JMH
         requires is slow. Activate it with: mvn clean package -Pbenchmarks -DskipTests
@@ -50,6 +52,14 @@
     <properties>
         <java.version>21</java.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <!--
+            Spring Boot 3.3.0 manages Testcontainers at 1.19.8, which has a known
+            compatibility issue with newer Docker Desktop versions (the docker-java
+            client gets an HTTP 400 from Docker Desktop's socket proxy on /info).
+            Overriding here bumps Testcontainers without touching individual
+            dependency declarations — they all inherit from this property.
+        -->
+        <testcontainers.version>1.20.4</testcontainers.version>
         <!--
             JMH is not covered by the Spring Boot BOM, so we manage its version here.
             All other dependency versions come from the parent BOM automatically.
