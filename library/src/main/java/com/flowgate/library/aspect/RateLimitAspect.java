@@ -1,79 +1,158 @@
 package com.flowgate.library.aspect;
 
+import com.flowgate.core.Algorithm;
+import com.flowgate.core.RateLimiter;
+import com.flowgate.core.RateLimiterConfig;
+import com.flowgate.core.model.RateLimitResult;
+import com.flowgate.core.redis.RedisLeakyBucketRateLimiter;
+import com.flowgate.core.redis.RedisSlidingWindowCounterRateLimiter;
+import com.flowgate.core.redis.RedisSlidingWindowLogRateLimiter;
+import com.flowgate.core.redis.RedisTokenBucketRateLimiter;
 import com.flowgate.library.annotation.RateLimit;
 import com.flowgate.library.exception.RateLimitExceededException;
+import io.lettuce.core.RedisClient;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
+import org.aspectj.lang.reflect.MethodSignature;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.expression.MethodBasedEvaluationContext;
+import org.springframework.core.DefaultParameterNameDiscoverer;
+import org.springframework.expression.EvaluationContext;
+import org.springframework.expression.ExpressionParser;
+import org.springframework.expression.spel.standard.SpelExpressionParser;
+
+import java.lang.reflect.Method;
+import java.time.Duration;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * AOP aspect that intercepts @RateLimit-annotated methods and enforces limits.
+ * AOP aspect that enforces @RateLimit on any Spring-managed method.
  *
- * <p>How @Around advice works:
- * When Spring sees a call to an annotated method, it routes the call through
- * this advice first. The advice decides whether to:
- * <ol>
- *   <li>Call {@code joinPoint.proceed()} → execute the original method</li>
- *   <li>Throw an exception → short-circuit without running the method</li>
- * </ol>
- *
- * <p>Full execution flow (implemented in Week 4):
+ * <h3>Execution flow</h3>
  * <pre>
  *   HTTP request
- *       → Spring MVC
- *       → RateLimitAspect.enforce()        ← we are here
- *           → evaluate SpEL key expression
- *           → call RateLimiter.tryAcquire()
- *               → Redis Lua script (atomic check + increment)
- *           → if allowed: joinPoint.proceed() → controller method
- *           → if rejected: throw RateLimitExceededException
- *       → GlobalExceptionHandler catches it, returns 429
+ *     → Spring MVC
+ *     → RateLimitAspect.enforce()
+ *         1. Resolve the rate-limit key (SpEL or method signature)
+ *         2. Look up or create the RateLimiter for this annotation's config
+ *         3. Call tryAcquire(key) → Lua script executes atomically on Redis
+ *         4. allowed → joinPoint.proceed() → controller runs
+ *            rejected → throw RateLimitExceededException → 429 response
  * </pre>
  *
- * <p><b>TODO (Week 4):</b> Wire in SpEL evaluation and RateLimiter implementations.
+ * <h3>Limiter caching</h3>
+ * Each unique combination of (algorithm, limit, window) gets its own
+ * {@link RateLimiter} instance, created on first use and cached. Most
+ * applications annotate a handful of endpoints, so this map stays small.
+ * {@link ConcurrentHashMap#computeIfAbsent} ensures only one instance
+ * is created per config even under concurrent first-use.
+ *
+ * <h3>SpEL key resolution</h3>
+ * The {@code key()} attribute on @RateLimit is a SpEL expression evaluated
+ * against the method's arguments. Spring's {@link MethodBasedEvaluationContext}
+ * makes parameter names available by name (e.g. {@code "#userId"}).
+ * If {@code key()} is empty, the method's fully qualified signature is used,
+ * giving per-endpoint limiting rather than per-entity limiting.
  */
 @Aspect
 public class RateLimitAspect {
 
     private static final Logger log = LoggerFactory.getLogger(RateLimitAspect.class);
 
+    private final RedisClient redisClient;
+
     /**
-     * Intercepts any method annotated with @RateLimit.
-     *
-     * @param joinPoint the intercepted method call — call proceed() to run it
-     * @param rateLimit the annotation instance, with its configured values
+     * Cache: "ALGORITHM:limit:windowString" → RateLimiter instance.
+     * Different @RateLimit annotations with different limits or windows
+     * each get their own limiter instance backed by a distinct Redis key namespace.
      */
+    private final ConcurrentHashMap<String, RateLimiter> limiterCache = new ConcurrentHashMap<>();
+
+    private final ExpressionParser spelParser = new SpelExpressionParser();
+    private final DefaultParameterNameDiscoverer paramDiscoverer = new DefaultParameterNameDiscoverer();
+
+    public RateLimitAspect(RedisClient redisClient) {
+        this.redisClient = redisClient;
+    }
+
     @Around("@annotation(rateLimit)")
     public Object enforce(ProceedingJoinPoint joinPoint, RateLimit rateLimit) throws Throwable {
-        // TODO (Week 4): implement the following steps
-        //
-        // Step 1: Resolve the rate-limit key using SpEL
-        //   Use Spring's ExpressionParser to evaluate rateLimit.key()
-        //   against the method arguments (joinPoint.getArgs()).
-        //
-        // Step 2: Parse the window string into a Duration
-        //   e.g. "1m" → Duration.ofMinutes(1), "30s" → Duration.ofSeconds(30)
-        //
-        // Step 3: Select the correct RateLimiter implementation
-        //   based on rateLimit.algorithm() — inject a Map<Algorithm, RateLimiter>
-        //
-        // Step 4: Call tryAcquire()
-        //   RateLimitResult result = rateLimiter.tryAcquire(key, rateLimit.limit(), window);
-        //
-        // Step 5: Allow or reject
-        //   if (result.allowed()) return joinPoint.proceed();
-        //   else throw new RateLimitExceededException(result);
+        String key = resolveKey(joinPoint, rateLimit);
+        RateLimiter limiter = getOrCreateLimiter(rateLimit);
+        RateLimitResult result = limiter.tryAcquire(key);
 
-        log.debug("@RateLimit intercepted: method={}, algorithm={}, key={}, limit={}/{}",
-                joinPoint.getSignature().toShortString(),
-                rateLimit.algorithm(),
-                rateLimit.key(),
-                rateLimit.limit(),
-                rateLimit.window());
+        log.debug("Rate limit check: key={}, algorithm={}, allowed={}, remaining={}",
+                key, rateLimit.algorithm(), result.allowed(), result.remaining());
 
-        // Temporary pass-through until Week 4 implementation
-        return joinPoint.proceed();
+        if (result.allowed()) {
+            return joinPoint.proceed();
+        }
+
+        throw new RateLimitExceededException(result);
+    }
+
+    /**
+     * Resolves the rate-limit key from the @RateLimit annotation.
+     *
+     * <p>If {@code key()} is empty: use the method's fully qualified signature.
+     * This gives per-endpoint limiting — every caller shares one counter.
+     *
+     * <p>If {@code key()} is a SpEL expression (e.g. {@code "#userId"}):
+     * evaluate it against the method arguments. This gives per-entity limiting —
+     * each unique value gets its own counter in Redis.
+     */
+    private String resolveKey(ProceedingJoinPoint joinPoint, RateLimit rateLimit) {
+        if (rateLimit.key().isEmpty()) {
+            // Per-endpoint limiting: use the method signature as the key.
+            return joinPoint.getSignature().toLongString();
+        }
+
+        // Per-entity limiting: evaluate SpEL against the method arguments.
+        MethodSignature signature = (MethodSignature) joinPoint.getSignature();
+        Method method = signature.getMethod();
+
+        // MethodBasedEvaluationContext makes parameter names available as SpEL variables.
+        // e.g. "#userId" resolves to the value of the `userId` method parameter.
+        EvaluationContext context = new MethodBasedEvaluationContext(
+                joinPoint.getTarget(),
+                method,
+                joinPoint.getArgs(),
+                paramDiscoverer
+        );
+
+        Object value = spelParser.parseExpression(rateLimit.key()).getValue(context);
+        return value != null ? value.toString() : "null";
+    }
+
+    /**
+     * Returns a cached {@link RateLimiter} for the given annotation config,
+     * creating one on first use. The cache key encodes all fields that affect
+     * limiter behaviour so different annotations get different instances.
+     */
+    private RateLimiter getOrCreateLimiter(RateLimit rateLimit) {
+        String cacheKey = rateLimit.algorithm() + ":" + rateLimit.limit() + ":" + rateLimit.window();
+        return limiterCache.computeIfAbsent(cacheKey, k -> createLimiter(rateLimit));
+    }
+
+    private RateLimiter createLimiter(RateLimit rateLimit) {
+        Duration window = Duration.parse(rateLimit.window());
+        int limit = rateLimit.limit();
+        Algorithm algorithm = rateLimit.algorithm();
+
+        RateLimiterConfig config = switch (algorithm) {
+            case TOKEN_BUCKET    -> RateLimiterConfig.tokenBucket(limit, window);
+            case LEAKY_BUCKET    -> RateLimiterConfig.leakyBucket(limit, window);
+            case SLIDING_WINDOW_LOG, SLIDING_WINDOW_COUNTER ->
+                    RateLimiterConfig.slidingWindow(algorithm, limit, window);
+        };
+
+        return switch (algorithm) {
+            case TOKEN_BUCKET         -> new RedisTokenBucketRateLimiter(config, redisClient);
+            case LEAKY_BUCKET         -> new RedisLeakyBucketRateLimiter(config, redisClient);
+            case SLIDING_WINDOW_LOG   -> new RedisSlidingWindowLogRateLimiter(config, redisClient);
+            case SLIDING_WINDOW_COUNTER -> new RedisSlidingWindowCounterRateLimiter(config, redisClient);
+        };
     }
 }
