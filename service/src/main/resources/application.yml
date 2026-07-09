@@ -1,45 +1,24 @@
 spring:
   application:
     name: flowgate-service
-
+  # Read by FlowgateAutoConfiguration's flowgateRedisClient() bean.
+  # Defaults already match this (localhost:6379), but declared explicitly
+  # here so the connection settings are visible and easy to change for
+  # a non-local Redis instance.
   data:
     redis:
-      # Override with env vars in production: SPRING_DATA_REDIS_HOST, etc.
-      host: ${REDIS_HOST:localhost}
-      port: ${REDIS_PORT:6379}
-      # password: ${REDIS_PASSWORD:}  # uncomment if Redis auth is enabled
-      lettuce:
-        pool:
-          max-active: 10    # max connections in pool (tune based on load test results)
-          max-idle: 5
-          min-idle: 2
-          max-wait: 2000ms  # how long to wait for a connection before failing
+      host: localhost
+      port: 6379
 
 server:
-  port: ${SERVER_PORT:8080}
+  port: 8080
 
 management:
   endpoints:
     web:
       exposure:
-        include: health,prometheus,metrics,info  # Prometheus scrapes /actuator/prometheus
-  endpoint:
-    health:
-      show-details: always   # expose Redis connection status in /actuator/health
-  metrics:
-    export:
-      prometheus:
-        enabled: true
-    tags:
-      application: ${spring.application.name}  # tag all metrics with app name
+        include: health,info
 
-# Flowgate-specific configuration
-# (bound to a @ConfigurationProperties class in Week 4)
-flowgate:
-  redis:
-    key-prefix: "fg:"           # namespace all Redis keys to avoid collisions with other apps
-    connection-timeout: 2000    # ms — fail fast if Redis is unreachable
-  default-algorithm: TOKEN_BUCKET
-  fail-open: true               # if Redis is down: true = allow requests, false = reject all
-                                # fail-open is safer for most APIs (availability > correctness)
-                                # fail-closed is right for security-critical endpoints
+logging:
+  level:
+    com.flowgate: DEBUG

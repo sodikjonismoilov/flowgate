@@ -4,19 +4,21 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 /**
- * Flowgate standalone service.
+ * Flowgate demo service: a multi-tenant AI  API  gateway.
  *
- * <p>Exposes rate limiting as a language-agnostic network service.
- * Clients POST to /check with a key, algorithm, limit, and window and receive
- * an allow/deny decision with remaining quota and retry-after duration.
+ * <p>Exposes {@code POST /v1/completions}, protected by {@code @RateLimit}.
+ * Each caller authenticates with an {@code X-API-Key} header, and each distinct
+ * key gets an independent, Redis-backed rate limit-demonstrating the core
+ * distributed-systems property flowgate was built to solve: per-key isolation
+ * that holds even across multiple instances of this service.
  *
- * <p>Build milestones:
- * <ul>
- *   <li>Week 1: Basic Spring Boot setup, health check at /actuator/health
- *   <li>Week 3: Redis integration, first real POST /check endpoint
- *   <li>Week 5: gRPC endpoint alongside REST, JWT auth
- *   <li>Week 7: Prometheus metrics, structured logging, Grafana dashboard
- * </ul>
+ * <p>See {@link com.flowgate.service.controller.LlmGatewayController} for the
+ *  * endpoint and {@code @RateLimit} configuration, and
+ *  * {@link com.flowgate.service.exception.GlobalExceptionHandler} for how a
+ *  * rejected request becomes an HTTP 429.
+ *
+ *  <p>Requires a running Redis instance (see {@code application.yml} for
+ *  connection settings - defaults to {@code localhost:6379}
  */
 @SpringBootApplication
 public class FlowgateServiceApplication {

@@ -15,8 +15,9 @@
     <artifactId>flowgate-service</artifactId>
     <name>flowgate-service</name>
     <description>
-        Standalone HTTP (and later gRPC) server exposing rate limiting as a network service.
-        For polyglot architectures where embedding a JVM library is not possible.
+        Standalone Spring Boot service demonstrating flowgate as a multi-tenant
+        AI API gateway. POST /v1/completions is protected by @RateLimit, enforcing
+        a distinct Redis-backed quota per tenant API key.
     </description>
 
     <dependencies>
@@ -26,28 +27,28 @@
             <artifactId>flowgate-core</artifactId>
         </dependency>
 
-        <!-- Embedded Tomcat + Spring MVC for the POST /check endpoint -->
+        <!--
+            The @RateLimit annotation, RateLimitAspect, and FlowgateAutoConfiguration.
+            Adding this JAR is the entire integration story: Spring Boot auto-discovers
+            FlowgateAutoConfiguration via META-INF/spring/...AutoConfiguration.imports,
+            registers the RedisClient and RateLimitAspect beans, and any @RateLimit-annotated
+            controller method in this module is enforced automatically.
+        -->
+        <dependency>
+            <groupId>com.flowgate</groupId>
+            <artifactId>flowgate-library</artifactId>
+        </dependency>
+
+        <!-- Embedded Tomcat + Spring MVC for the POST /v1/completions endpoint -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
 
-        <!-- RedisTemplate for distributed algorithm state -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-data-redis</artifactId>
-        </dependency>
-
-        <!-- /actuator/health, /actuator/info, /actuator/prometheus endpoints -->
+        <!-- /actuator/health, /actuator/info endpoints -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
-        </dependency>
-
-        <!-- Exposes JVM, HTTP, and custom rate-limit counters to Prometheus -->
-        <dependency>
-            <groupId>io.micrometer</groupId>
-            <artifactId>micrometer-registry-prometheus</artifactId>
         </dependency>
 
         <!--
@@ -55,15 +56,6 @@
             <dependency>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
-            </dependency>
-        -->
-
-        <!--
-            TODO (Week 5): gRPC endpoint alongside REST
-            <dependency>
-                <groupId>net.devh</groupId>
-                <artifactId>grpc-server-spring-boot-starter</artifactId>
-                <version>2.15.0.RELEASE</version>
             </dependency>
         -->
 
