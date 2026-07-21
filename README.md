@@ -158,8 +158,8 @@ Sliding Window Counter  TBD                    TBD
 - [X] **Week 1** — Token Bucket, in-memory, with unit tests
 - [X] **Week 2** — All four algorithms, in-memory, common `RateLimiter` interface
 - [X] **Week 3** — Redis backend + atomic Lua scripts + Testcontainers integration tests
-- [ ] **Week 4** — Spring Boot library (`@RateLimit` annotation + AOP aspect)
-- [ ] **Week 5** — Standalone gRPC service + REST fallback
+- [X] **Week 4** — Spring Boot library (`@RateLimit` annotation + AOP aspect)
+- [X] **Week 5** — Standalone gRPC service + REST fallback
 - [ ] **Week 6** — JMH benchmarks, performance analysis, documented optimization
 - [ ] **Week 7** — Prometheus metrics, Grafana dashboard, Docker + K8s deployment
 - [ ] **Week 8** — README polish, demo video, blog post, v1.0 release tag

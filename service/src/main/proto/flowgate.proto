@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package flowgate.v1;
+
+option java_multiple_files = true;
+option java_package = "com.flowgate.service.grpc.proto";
+
+service RateLimitService {
+  rpc Check(CheckRequest) returns (CheckResponse);
+}
+
+enum Algorithm {
+  ALGORITHM_UNSPECIFIED = 0;
+  TOKEN_BUCKET = 1;
+  LEAKY_BUCKET = 2;
+  SLIDING_WINDOW_LOG = 3;
+  SLIDING_WINDOW_COUNTER = 4;
+}
+
+message CheckRequest {
+  string key = 1;
+  Algorithm algorithm = 2;
+  int64 limit = 3;
+  int64 window_millis = 4;
+}
+
+message CheckResponse {
+  bool allowed = 1;
+  int64 remaining = 2;
+  int64 retry_after_millis = 3;
+}
