@@ -1,65 +1,52 @@
 package com.flowgate.service.grpc;
 
-import com.flowgate.core.RateLimiter;
-import com.flowgate.core.RateLimiterConfig;
 import com.flowgate.core.model.RateLimitResult;
-import com.flowgate.core.redis.RedisLeakyBucketRateLimiter;
-import com.flowgate.core.redis.RedisSlidingWindowLogRateLimiter;
-import com.flowgate.core.redis.RedisSlidingWindowCounterRateLimiter;
-import com.flowgate.core.redis.RedisTokenBucketRateLimiter;
 import com.flowgate.service.grpc.proto.CheckRequest;
 import com.flowgate.service.grpc.proto.CheckResponse;
 import com.flowgate.service.grpc.proto.RateLimitServiceGrpc;
+import com.flowgate.service.ratelimit.RateLimitCheckRequest;
+import com.flowgate.service.ratelimit.RateLimitCheckService;
 import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
-import io.lettuce.core.RedisClient;
 import net.devh.boot.grpc.server.service.GrpcService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * gRPC entry point for flowgate's "rate limiting as a service" API.
  *
- * <p>Unlike {@link com.flowgate.library.aspect.RateLimitAspect}, which resolves
- * its key via SpEL against annotated method arguments, callers here are polyglot
- * clients (any language with a gRPC stub) that supply the key, algorithm, limit,
- * and window explicitly on every {@link CheckRequest} - config-per-request, no server-side
- * per-key configuration store.</p>
- *
- * <h3>Limiter caching</h3>
- * Mirrors {@code RateLimitAspect}'w approach: a {@link RateLimiter} instance is
- * expensive-ish to construct (opens a Redis connection) but cheap to reuse, since
- * all mutable state lives in Redis, not in Java object. Instances are cached
- * by {@code (algorithm, limit, windowMillis)} - the same combination always maps
- * to the same limiter, regardless of which tenant key is being checked.
+ * <p>Purely a transport adapter: decodes the wire-level {@link CheckRequest}
+ * into a protocol-agnostic {@link RateLimitCheckRequest} and delegates all
+ * enforcement logic — limiter caching, algorithm dispatch, validation — to
+ * {@link RateLimitCheckService}, which is shared with the REST fallback.
  */
-
 @GrpcService
 public class GrpcRateLimitService extends RateLimitServiceGrpc.RateLimitServiceImplBase {
 
     private static final Logger log = LoggerFactory.getLogger(GrpcRateLimitService.class);
 
-    private final RedisClient redisClient;
+    private final RateLimitCheckService checkService;
 
-    /** Cache: "ALGORITHM:limit:windowMillis" -> RateLimiter instance. */
-    private final ConcurrentHashMap<String, RateLimiter> limiterCache = new ConcurrentHashMap<>();
-
-    public GrpcRateLimitService(RedisClient redisClient) {
-        this.redisClient = redisClient;
+    public GrpcRateLimitService(RateLimitCheckService checkService) {
+        this.checkService = checkService;
     }
 
     @Override
     public void check(CheckRequest request, StreamObserver<CheckResponse> responseObserver) {
         try {
-            RateLimiter limiter = getOrCreateLimiter(request);
-            RateLimitResult result = limiter.tryAcquire(request.getKey());
+            RateLimitCheckRequest domainRequest = new RateLimitCheckRequest(
+                    request.getKey(),
+                    mapAlgorithm(request.getAlgorithm()),
+                    toIntLimit(request.getLimit()),
+                    Duration.ofMillis(request.getWindowMillis())
+            );
+
+            RateLimitResult result = checkService.check(domainRequest);
 
             log.debug("gRPC rate limit check: key={}, algorithm={}, allowed={}, remaining={}",
                     request.getKey(), request.getAlgorithm(), result.allowed(), result.remaining());
-
 
             CheckResponse response = CheckResponse.newBuilder()
                     .setAllowed(result.allowed())
@@ -70,48 +57,19 @@ public class GrpcRateLimitService extends RateLimitServiceGrpc.RateLimitServiceI
             responseObserver.onNext(response);
             responseObserver.onCompleted();
         } catch (IllegalArgumentException e) {
-            //Bad input (e.g. ALGORITHM_UNSPECIFIED, non-positive limit/window) is a
-            // client error, not a server fault - surface it as INVALID_ARGUMENT rather
-            //than an opaque UNKNOWN/INTERNAL status.
+            // gRPC has no automatic exception→status mapping (unlike Spring's
+            // @ExceptionHandler → HTTP code), so client errors are mapped explicitly.
             responseObserver.onError(
                     Status.INVALID_ARGUMENT.withDescription(e.getMessage()).withCause(e).asRuntimeException());
-
-
         }
-    }
-    private RateLimiter getOrCreateLimiter(CheckRequest request) {
-        String cacheKey = request.getAlgorithm() + ":" + request.getLimit() + ":" + request.getWindowMillis();
-        return limiterCache.computeIfAbsent(cacheKey, k -> createLimiter(request));
-    }
-
-    private RateLimiter createLimiter(CheckRequest request) {
-        int limit = validatedLimit(request.getLimit());
-        Duration window = validatedWindow(request.getWindowMillis());
-        com.flowgate.core.Algorithm algorithm = mapAlgorithm(request.getAlgorithm());
-
-        RateLimiterConfig config = switch (algorithm) {
-            case TOKEN_BUCKET -> RateLimiterConfig.tokenBucket(limit, window);
-            case LEAKY_BUCKET -> RateLimiterConfig.leakyBucket(limit, window);
-            case SLIDING_WINDOW_LOG, SLIDING_WINDOW_COUNTER ->
-                    RateLimiterConfig.slidingWindow(algorithm, limit, window);
-        };
-
-        return switch (algorithm) {
-            case TOKEN_BUCKET -> new RedisTokenBucketRateLimiter(config, redisClient);
-            case LEAKY_BUCKET -> new RedisLeakyBucketRateLimiter(config, redisClient);
-            case SLIDING_WINDOW_LOG -> new RedisSlidingWindowLogRateLimiter(config, redisClient);
-            case SLIDING_WINDOW_COUNTER -> new RedisSlidingWindowCounterRateLimiter(config, redisClient);
-        };
     }
 
     /**
      * Maps the wire-level proto enum to flowgate-core's Algorithm enum.
-     * ALGORITHM_UNSPECIFIED (the proto zero-value) is rejected explicitly so a
-     * caller who forgets to set the field gets clear error instead of silently
-     * falling through to whichever algorithm happens to be first in the switch statement.
-     *
+     * ALGORITHM_UNSPECIFIED (the proto zero-value) and UNRECOGNIZED (proto3's
+     * forward-compat catch-all) are rejected explicitly rather than falling
+     * through to a default algorithm.
      */
-
     private com.flowgate.core.Algorithm mapAlgorithm(com.flowgate.service.grpc.proto.Algorithm protoAlgorithm) {
         return switch (protoAlgorithm) {
             case TOKEN_BUCKET -> com.flowgate.core.Algorithm.TOKEN_BUCKET;
@@ -123,17 +81,11 @@ public class GrpcRateLimitService extends RateLimitServiceGrpc.RateLimitServiceI
         };
     }
 
-    private int validatedLimit(long limit) {
+    /** proto3 uses int64 for limit; flowgate-core's config takes an int. */
+    private int toIntLimit(long limit) {
         if (limit <= 0 || limit > Integer.MAX_VALUE) {
             throw new IllegalArgumentException("limit must be a positive int, got: " + limit);
         }
         return (int) limit;
-    }
-
-    private Duration validatedWindow(long windowMillis) {
-        if (windowMillis <= 0) {
-            throw new IllegalArgumentException("window_millis must be positive, got: " + windowMillis);
-        }
-        return Duration.ofMillis(windowMillis);
     }
 }
