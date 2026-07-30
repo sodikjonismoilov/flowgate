@@ -14,6 +14,7 @@ import java.time.Duration;
  * which transport a request arrived over.
  */
 public record RateLimitCheckRequest(
+        String tenantId,
         String key,
         Algorithm algorithm,
         int limit,

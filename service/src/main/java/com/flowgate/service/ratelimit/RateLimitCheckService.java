@@ -10,7 +10,12 @@ import com.flowgate.core.redis.RedisTokenBucketRateLimiter;
 import io.lettuce.core.RedisClient;
 import org.springframework.stereotype.Component;
 
+import com.flowgate.core.FailurePolicy;
+import com.flowgate.core.FailSafeRateLimiter;
+import org.springframework.beans.factory.annotation.Value;
+
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Supplier;
 
 /**
  * Single source of truth for "is this key allowed to proceed" — shared by
@@ -31,17 +36,27 @@ public class RateLimitCheckService {
 
     private final ConcurrentHashMap<String, RateLimiter> limiterCache = new ConcurrentHashMap<>();
 
-    public RateLimitCheckService(RedisClient redisClient) {
+
+    private final FailurePolicy failurePolicy;
+
+    public RateLimitCheckService(
+            RedisClient redisClient,
+            @Value("${flowgate.failure-policy:FAIL_OPEN}") FailurePolicy failurePolicy) {
         this.redisClient = redisClient;
+        this.failurePolicy = failurePolicy;
     }
 
     public RateLimitResult check(RateLimitCheckRequest request) {
         validate(request);
         RateLimiter limiter = getOrCreateLimiter(request);
-        return limiter.tryAcquire(request.key());
+        String namespacedKey = request.tenantId() + ":" + request.key();
+        return limiter.tryAcquire(namespacedKey);
     }
 
     private void validate(RateLimitCheckRequest request) {
+        if (request.tenantId() == null || request.tenantId().isBlank()) {
+            throw new IllegalArgumentException("tenant_id must be set");
+        }
         if (request.algorithm() == null) {
             throw new IllegalArgumentException("algorithm must be set");
         }
@@ -70,11 +85,13 @@ public class RateLimitCheckService {
                     RateLimiterConfig.slidingWindow(algorithm, limit, window);
         };
 
-        return switch (algorithm) {
+        Supplier<RateLimiter> delegateSupplier = () -> switch (algorithm) {
             case TOKEN_BUCKET -> new RedisTokenBucketRateLimiter(config, redisClient);
             case LEAKY_BUCKET -> new RedisLeakyBucketRateLimiter(config, redisClient);
             case SLIDING_WINDOW_LOG -> new RedisSlidingWindowLogRateLimiter(config, redisClient);
             case SLIDING_WINDOW_COUNTER -> new RedisSlidingWindowCounterRateLimiter(config, redisClient);
         };
+
+        return new FailSafeRateLimiter(config, delegateSupplier, failurePolicy);
     }
 }

@@ -26,9 +26,10 @@ public class RateLimitCheckController {
         this.checkService = checkService;
     }
 
-    @PostMapping("/v1/ratelimit/check")
+    @PostMapping("/check")
     public ResponseEntity<CheckResponseDto> check(@RequestBody CheckRequestDto request) {
         RateLimitCheckRequest domainRequest = new RateLimitCheckRequest(
+                request.tenantId(),
                 request.key(),
                 request.algorithm(),
                 request.limit(),
@@ -47,7 +48,7 @@ public class RateLimitCheckController {
     }
 
     /** Mirrors the proto CheckRequest shape; Algorithm's JSON form is its enum name (e.g. "TOKEN_BUCKET"). */
-    public record CheckRequestDto(String key, Algorithm algorithm, int limit, long windowMillis) {
+    public record CheckRequestDto(String tenantId,String key, Algorithm algorithm, int limit, long windowMillis) {
     }
 
     public record CheckResponseDto(boolean allowed, long remaining, long retryAfterMillis) {
