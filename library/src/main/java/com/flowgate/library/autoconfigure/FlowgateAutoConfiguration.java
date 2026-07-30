@@ -1,5 +1,6 @@
 package com.flowgate.library.autoconfigure;
 
+import com.flowgate.core.FailurePolicy;
 import com.flowgate.library.aspect.RateLimitAspect;
 import io.lettuce.core.RedisClient;
 import org.springframework.beans.factory.annotation.Value;
@@ -63,7 +64,8 @@ public class FlowgateAutoConfiguration {
      * Injected with the {@code RedisClient} bean (ours or the app's own).
      */
     @Bean
-    public RateLimitAspect rateLimitAspect(RedisClient flowgateRedisClient) {
-        return new RateLimitAspect(flowgateRedisClient);
+    public RateLimitAspect rateLimitAspect(RedisClient flowgateRedisClient,
+                                           @Value("${flowgate.failure-policy:FAIL_OPEN}") FailurePolicy failurePolicy) {
+        return new RateLimitAspect(flowgateRedisClient,  failurePolicy);
     }
 }

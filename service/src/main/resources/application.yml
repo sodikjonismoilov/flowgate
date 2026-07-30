@@ -22,3 +22,7 @@ management:
 logging:
   level:
     com.flowgate: DEBUG
+
+grpc:
+  server:
+    port: 9091

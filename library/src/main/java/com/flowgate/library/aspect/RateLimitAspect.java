@@ -23,9 +23,12 @@ import org.springframework.expression.EvaluationContext;
 import org.springframework.expression.ExpressionParser;
 import org.springframework.expression.spel.standard.SpelExpressionParser;
 
+import com.flowgate.core.FailSafeRateLimiter;
+import com.flowgate.core.FailurePolicy;
 import java.lang.reflect.Method;
 import java.time.Duration;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Supplier;
 
 /**
  * AOP aspect that enforces @RateLimit on any Spring-managed method.
@@ -62,6 +65,7 @@ public class RateLimitAspect {
     private static final Logger log = LoggerFactory.getLogger(RateLimitAspect.class);
 
     private final RedisClient redisClient;
+    private final FailurePolicy failurePolicy;
 
     /**
      * Cache: "ALGORITHM:limit:windowString" → RateLimiter instance.
@@ -73,8 +77,9 @@ public class RateLimitAspect {
     private final ExpressionParser spelParser = new SpelExpressionParser();
     private final DefaultParameterNameDiscoverer paramDiscoverer = new DefaultParameterNameDiscoverer();
 
-    public RateLimitAspect(RedisClient redisClient) {
+    public RateLimitAspect(RedisClient redisClient, FailurePolicy failurePolicy ) {
         this.redisClient = redisClient;
+        this.failurePolicy = failurePolicy;
     }
 
     @Around("@annotation(rateLimit)")
@@ -148,11 +153,13 @@ public class RateLimitAspect {
                     RateLimiterConfig.slidingWindow(algorithm, limit, window);
         };
 
-        return switch (algorithm) {
+        Supplier<RateLimiter> delegateSupplier = () -> switch (algorithm) {
             case TOKEN_BUCKET         -> new RedisTokenBucketRateLimiter(config, redisClient);
             case LEAKY_BUCKET         -> new RedisLeakyBucketRateLimiter(config, redisClient);
             case SLIDING_WINDOW_LOG   -> new RedisSlidingWindowLogRateLimiter(config, redisClient);
             case SLIDING_WINDOW_COUNTER -> new RedisSlidingWindowCounterRateLimiter(config, redisClient);
         };
+
+        return new FailSafeRateLimiter(config, delegateSupplier, failurePolicy);
     }
 }
