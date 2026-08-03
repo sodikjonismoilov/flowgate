@@ -30,6 +30,9 @@ import java.time.Duration;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
+
 /**
  * AOP aspect that enforces @RateLimit on any Spring-managed method.
  *
@@ -59,6 +62,7 @@ import java.util.function.Supplier;
  * If {@code key()} is empty, the method's fully qualified signature is used,
  * giving per-endpoint limiting rather than per-entity limiting.
  */
+
 @Aspect
 public class RateLimitAspect {
 
@@ -66,6 +70,7 @@ public class RateLimitAspect {
 
     private final RedisClient redisClient;
     private final FailurePolicy failurePolicy;
+    private final MeterRegistry meterRegistry;
 
     /**
      * Cache: "ALGORITHM:limit:windowString" → RateLimiter instance.
@@ -77,16 +82,24 @@ public class RateLimitAspect {
     private final ExpressionParser spelParser = new SpelExpressionParser();
     private final DefaultParameterNameDiscoverer paramDiscoverer = new DefaultParameterNameDiscoverer();
 
-    public RateLimitAspect(RedisClient redisClient, FailurePolicy failurePolicy ) {
+    public RateLimitAspect(RedisClient redisClient, FailurePolicy failurePolicy, MeterRegistry meterRegistry ) {
         this.redisClient = redisClient;
         this.failurePolicy = failurePolicy;
+        this.meterRegistry = meterRegistry;
     }
 
     @Around("@annotation(rateLimit)")
     public Object enforce(ProceedingJoinPoint joinPoint, RateLimit rateLimit) throws Throwable {
         String key = resolveKey(joinPoint, rateLimit);
         RateLimiter limiter = getOrCreateLimiter(rateLimit);
+        String algorithmTag = rateLimit.algorithm().name();
+
+        Timer.Sample sample = Timer.start(meterRegistry);
         RateLimitResult result = limiter.tryAcquire(key);
+        sample.stop(meterRegistry.timer("flowgate.check.duration", "algorithm", algorithmTag));
+
+        meterRegistry.counter("flowgate.check.duration", "algorithm", algorithmTag,
+                "outcome", result.allowed() ? "allowed" : "denied").increment();
 
         log.debug("Rate limit check: key={}, algorithm={}, allowed={}, remaining={}",
                 key, rateLimit.algorithm(), result.allowed(), result.remaining());
