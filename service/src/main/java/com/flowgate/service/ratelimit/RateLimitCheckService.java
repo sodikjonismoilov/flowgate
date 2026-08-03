@@ -17,6 +17,9 @@ import org.springframework.beans.factory.annotation.Value;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
+
 /**
  * Single source of truth for "is this key allowed to proceed" — shared by
  * {@link com.flowgate.service.grpc.GrpcRateLimitService} and the REST fallback
@@ -38,19 +41,31 @@ public class RateLimitCheckService {
 
 
     private final FailurePolicy failurePolicy;
+    private final MeterRegistry meterRegistry;
 
     public RateLimitCheckService(
             RedisClient redisClient,
-            @Value("${flowgate.failure-policy:FAIL_OPEN}") FailurePolicy failurePolicy) {
+            @Value("${flowgate.failure-policy:FAIL_OPEN}") FailurePolicy failurePolicy,
+            MeterRegistry meterRegistry) {
         this.redisClient = redisClient;
         this.failurePolicy = failurePolicy;
+        this.meterRegistry = meterRegistry;
     }
 
     public RateLimitResult check(RateLimitCheckRequest request) {
         validate(request);
         RateLimiter limiter = getOrCreateLimiter(request);
         String namespacedKey = request.tenantId() + ":" + request.key();
-        return limiter.tryAcquire(namespacedKey);
+        String algorithmTag = request.algorithm().name();
+
+        Timer.Sample sample = Timer.start(meterRegistry);
+        RateLimitResult result = limiter.tryAcquire(namespacedKey);
+        sample.stop(meterRegistry.timer("flowgate.check.duration", "algorithm", algorithmTag));
+
+        meterRegistry.counter("flowgate.requests", "algorithm", algorithmTag,
+                "outcome", result.allowed() ? "allowed" : "denied").increment();
+
+        return result;
     }
 
     private void validate(RateLimitCheckRequest request) {

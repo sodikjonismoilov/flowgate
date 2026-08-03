@@ -39,6 +39,11 @@
             <artifactId>flowgate-library</artifactId>
         </dependency>
 
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
         <!-- Embedded Tomcat + Spring MVC for the POST /v1/completions endpoint -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

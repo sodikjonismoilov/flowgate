@@ -3,6 +3,8 @@ package com.flowgate.library.autoconfigure;
 import com.flowgate.core.FailurePolicy;
 import com.flowgate.library.aspect.RateLimitAspect;
 import io.lettuce.core.RedisClient;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -60,12 +62,25 @@ public class FlowgateAutoConfiguration {
     }
 
     /**
+     * Fallback {@Code MeterRegistry} for consuming apps that haven't configured
+     * their own (e.g. via Spring Boot Actuator + micrometer-registry-prometheus).
+     * if the app HAS Actuator on the classpath, Spring Boot's own autoconfiguration
+     * creates a real registry first and this bean is skipped via {@code @ConditionalOnMissingBean}.
+     */
+    @Bean
+    @ConditionalOnMissingBean(MeterRegistry.class)
+    public MeterRegistry meterRegistry() {
+        return new SimpleMeterRegistry();
+    }
+
+    /**
      * The AOP aspect that intercepts {@code @RateLimit}-annotated methods.
      * Injected with the {@code RedisClient} bean (ours or the app's own).
      */
     @Bean
     public RateLimitAspect rateLimitAspect(RedisClient flowgateRedisClient,
-                                           @Value("${flowgate.failure-policy:FAIL_OPEN}") FailurePolicy failurePolicy) {
-        return new RateLimitAspect(flowgateRedisClient,  failurePolicy);
+                                           @Value("${flowgate.failure-policy:FAIL_OPEN}") FailurePolicy failurePolicy,
+                                           MeterRegistry flowgateMeterRegistry) {
+        return new RateLimitAspect(flowgateRedisClient, failurePolicy, flowgateMeterRegistry);
     }
 }

@@ -27,6 +27,11 @@
             <artifactId>flowgate-core</artifactId>
         </dependency>
 
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-core</artifactId>
+        </dependency>
+
         <!--
             spring-boot-autoconfigure, NOT spring-boot-starter.
             A library should never pull in opinionated starters (logging, banner, etc.)
