@@ -26,6 +26,17 @@
             <groupId>com.flowgate</groupId>
             <artifactId>flowgate-core</artifactId>
         </dependency>
+        <!--
+            Lettuce arrives transitively via flowgate-core, but the Redis benchmarks
+            reference RedisClient/RedisURI directly, so it is declared explicitly here.
+            Depending on a type you only get transitively is how builds break silently
+            when an upstream module drops a dependency. Version comes from the Spring
+            Boot BOM in the parent, so this stays in lockstep with core and service.
+        -->
+        <dependency>
+            <groupId>io.lettuce</groupId>
+            <artifactId>lettuce-core</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.openjdk.jmh</groupId>
             <artifactId>jmh-core</artifactId>
@@ -33,10 +44,17 @@
         <!--
             The annotation processor generates benchmark runner code at compile time.
             Marked "provided" because it's only needed at compile time, not runtime.
+
+            NOTE the artifactId: JMH publishes "jmh-generator-annprocess", not
+            "jmh-generator-annproc". The parent's dependencyManagement block manages the
+            latter (misspelled) coordinate, which resolves to nothing, so the version is
+            pinned here explicitly from the inherited ${jmh.version} property. Fixing the
+            parent's entry would let this <version> be dropped again.
         -->
         <dependency>
             <groupId>org.openjdk.jmh</groupId>
-            <artifactId>jmh-generator-annproc</artifactId>
+            <artifactId>jmh-generator-annprocess</artifactId>
+            <version>${jmh.version}</version>
             <scope>provided</scope>
         </dependency>
     </dependencies>
@@ -54,7 +72,7 @@
                     <annotationProcessorPaths>
                         <path>
                             <groupId>org.openjdk.jmh</groupId>
-                            <artifactId>jmh-generator-annproc</artifactId>
+                            <artifactId>jmh-generator-annprocess</artifactId>
                             <version>${jmh.version}</version>
                         </path>
                     </annotationProcessorPaths>
@@ -80,7 +98,23 @@
                         <goals><goal>shade</goal></goals>
                         <configuration>
                             <finalName>benchmarks</finalName>
-                            <transformers>
+                            <!--
+                                Nothing consumes flowgate-benchmark as a dependency — it is a
+                                runnable artifact, not a library — so the dependency-reduced POM
+                                shade would otherwise drop in the module root is pure noise in
+                                `git status`.
+                            -->
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <!--
+                                combine.self="override" is required. spring-boot-starter-parent
+                                declares its own maven-shade-plugin pluginManagement with a
+                                <transformers> list (AppendingTransformers for spring.handlers /
+                                spring.schemas). Maven merges inherited configuration lists
+                                positionally, so without this the parent's <resource> element
+                                lands on our ManifestResourceTransformer and the build fails with
+                                "Cannot find 'resource' in ManifestResourceTransformer".
+                            -->
+                            <transformers combine.self="override">
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                                     <mainClass>org.openjdk.jmh.Main</mainClass>
                                 </transformer>

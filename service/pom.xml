@@ -44,6 +44,28 @@
             <artifactId>micrometer-registry-prometheus</artifactId>
         </dependency>
 
+        <!--
+            Structured (JSON) logging. Spring Boot already puts Logback on the
+            classpath via spring-boot-starter-logging; this adds the encoder that
+            renders each event as a single JSON object instead of a text line.
+
+            Why it matters here: CorrelationIdFilter / CorrelationIdGrpcInterceptor
+            put the correlation ID into SLF4J's MDC. LogstashEncoder serialises the
+            whole MDC map as top-level JSON fields, so `correlationId` becomes a
+            queryable field in Loki/ELK/CloudWatch rather than text buried in a
+            message. With the default text encoder the MDC would be silently dropped
+            unless every pattern string remembered to reference %X{correlationId}.
+
+            Not managed by the Spring Boot BOM, so the version is explicit.
+            7.4 is the release line built against Logback 1.5.x, which is what
+            spring-boot-starter-parent 3.3.0 resolves.
+        -->
+        <dependency>
+            <groupId>net.logstash.logback</groupId>
+            <artifactId>logstash-logback-encoder</artifactId>
+            <version>7.4</version>
+        </dependency>
+
         <!-- Embedded Tomcat + Spring MVC for the POST /v1/completions endpoint -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -107,6 +129,18 @@
             </extension>
         </extensions>
         <plugins>
+            <!--
+                spring-boot-starter-parent only *manages* this plugin — it still has to be
+                declared to run. Without it `mvn package` produces a plain library jar with
+                no Main-Class, and `java -jar service/target/flowgate-service-*.jar` fails
+                with "no main manifest attribute". Declaring it binds the `repackage` goal,
+                producing an executable fat jar — which is also what a Dockerfile needs.
+            -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+
             <plugin>
                 <groupId>org.xolstice.maven.plugins</groupId>
                 <artifactId>protobuf-maven-plugin</artifactId>
