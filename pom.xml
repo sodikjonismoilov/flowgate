@@ -92,9 +92,15 @@
                 <artifactId>jmh-core</artifactId>
                 <version>${jmh.version}</version>
             </dependency>
+            <!--
+                artifactId is "jmh-generator-annprocess" — the full word. An earlier
+                "jmh-generator-annproc" here managed a coordinate that JMH has never
+                published, so the entry resolved to nothing and benchmark/pom.xml had
+                to pin the version itself.
+            -->
             <dependency>
                 <groupId>org.openjdk.jmh</groupId>
-                <artifactId>jmh-generator-annproc</artifactId>
+                <artifactId>jmh-generator-annprocess</artifactId>
                 <version>${jmh.version}</version>
                 <scope>provided</scope>
             </dependency>

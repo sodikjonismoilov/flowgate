@@ -98,7 +98,13 @@ public class RateLimitAspect {
         RateLimitResult result = limiter.tryAcquire(key);
         sample.stop(meterRegistry.timer("flowgate.check.duration", "algorithm", algorithmTag));
 
-        meterRegistry.counter("flowgate.check.duration", "algorithm", algorithmTag,
+        // Counter name must be "flowgate.requests" — the same meter the service's
+        // RateLimitCheckService increments, and the one the Grafana "Request Rate
+        // by Outcome" panel queries. Naming it after the timer instead produced a
+        // second, differently-shaped meter (flowgate_check_duration_total) that no
+        // panel read, so allowed/denied traffic flowing through the @RateLimit
+        // annotation was invisible on the dashboard.
+        meterRegistry.counter("flowgate.requests", "algorithm", algorithmTag,
                 "outcome", result.allowed() ? "allowed" : "denied").increment();
 
         log.debug("Rate limit check: key={}, algorithm={}, allowed={}, remaining={}",

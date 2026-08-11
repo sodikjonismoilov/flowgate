@@ -1,0 +1,2 @@
+# Written by handleSummary() on every k6 run — a per-run artifact, not source.
+summary.json

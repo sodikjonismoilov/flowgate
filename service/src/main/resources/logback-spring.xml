@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Logback configuration for flowgate-service.
+
+    Named logback-spring.xml (not logback.xml) so Spring Boot owns the
+    initialisation. That buys two things plain Logback cannot do:
+      * <springProfile> — profile-conditional appenders, used below to keep
+        local development readable while shipping JSON everywhere else.
+      * <springProperty> — pull values out of the Spring Environment
+        (application.yml, env vars, CLI args) into the logging config.
+
+    The point of this file is item 11: correlation IDs must actually reach the
+    log sink as structured data. CorrelationIdFilter (REST) and
+    CorrelationIdGrpcInterceptor (gRPC) already put `correlationId` into SLF4J's
+    MDC; LogstashEncoder serialises the MDC as top-level JSON fields, so a log
+    aggregator can filter on correlationId="..." and get every line — REST and
+    gRPC — emitted while handling one logical request.
+-->
+<configuration>
+
+    <!-- Spring Boot's own colour/level converters, used by the console pattern below. -->
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+
+    <!--
+        spring.application.name is set in application.yml. Injecting it here means
+        every JSON event is tagged with the emitting service, which is what makes
+        logs from several services usable in one index.
+    -->
+    <springProperty scope="context" name="appName" source="spring.application.name"
+                    defaultValue="flowgate-service"/>
+
+    <!-- ─── JSON appender (structured output) ──────────────────────────────
+         One JSON object per line. LogstashEncoder includes the MDC by default;
+         the explicit <includeMdc>true</includeMdc> below is documentation, not
+         a behaviour change — it is the line that makes correlationId land in
+         the output, so it is worth being explicit about.
+    -->
+    <appender name="JSON" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <includeMdc>true</includeMdc>
+
+            <!--
+                The Logback *context* map also carries appName (set by the
+                springProperty above). Emitting it would duplicate the "service"
+                custom field below, so the context is suppressed and appName is
+                used only for interpolation.
+            -->
+            <includeContext>false</includeContext>
+
+            <!--
+                Rename Logstash's defaults to the names most log platforms expect.
+                @timestamp is left alone — it is the field Elasticsearch and Loki
+                both key time off.
+            -->
+            <fieldNames>
+                <timestamp>@timestamp</timestamp>
+                <message>message</message>
+                <logger>logger</logger>
+                <thread>thread</thread>
+                <levelValue>[ignore]</levelValue>
+            </fieldNames>
+
+            <!-- Static fields merged into every event. -->
+            <customFields>{"service":"${appName}"}</customFields>
+
+            <!--
+                Stack traces: cap depth and collapse framework noise so a single
+                exception cannot blow past a log platform's per-event size limit.
+                maxDepthPerThrowable keeps the top frames — the ones that name your
+                code — and drops the reflective/servlet plumbing underneath.
+            -->
+            <throwableConverter class="net.logstash.logback.stacktrace.ShortenedThrowableConverter">
+                <maxDepthPerThrowable>30</maxDepthPerThrowable>
+                <maxLength>8192</maxLength>
+                <rootCauseFirst>true</rootCauseFirst>
+                <exclude>^sun\.reflect\..*\.invoke</exclude>
+                <exclude>^net\.sf\.cglib\.proxy\.MethodProxy\.invoke</exclude>
+            </throwableConverter>
+        </encoder>
+    </appender>
+
+    <!-- ─── Human-readable appender (local development) ─────────────────────
+         Same information, laid out for a terminal. [correlationId] is printed
+         inline via %X{correlationId} so you can still eyeball-correlate lines
+         while running locally, with '-' standing in when there is no ID (e.g.
+         startup logging, before any request exists).
+    -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%clr(%d{yyyy-MM-dd HH:mm:ss.SSS}){faint} %clr(%5p) %clr([%X{correlationId:--}]){magenta} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n%wEx</pattern>
+        </encoder>
+    </appender>
+
+    <!-- ─── Profile wiring ─────────────────────────────────────────────────
+         Default (no profile, i.e. `mvn -pl :flowgate-service spring-boot:run`)
+         gets the readable console. Anything running as a deployed process —
+         docker, prod — gets JSON. The explicit `json` profile exists so the
+         structured output can be demonstrated locally without pretending to be
+         in production, by activating the "json" profile at launch.
+    -->
+    <springProfile name="json | docker | prod">
+        <root level="INFO">
+            <appender-ref ref="JSON"/>
+        </root>
+    </springProfile>
+
+    <springProfile name="!json &amp; !docker &amp; !prod">
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+    </springProfile>
+
+    <!--
+        application.yml sets logging.level.com.flowgate=DEBUG; that property is
+        applied by Spring Boot on top of this file, so it is not repeated here.
+        Quieting the noisy third-party loggers is done here because it is a
+        property of the log configuration, not of the environment.
+    -->
+    <logger name="io.lettuce.core" level="INFO"/>
+    <logger name="io.grpc.netty" level="INFO"/>
+    <logger name="org.springframework.web" level="INFO"/>
+
+</configuration>

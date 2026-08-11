@@ -2,16 +2,29 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, develop ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+# Newer pushes to the same branch/PR cancel older in-flight runs.
+# Testcontainers runs are not free — don't pay for stale commits.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   build-and-test:
+    name: Build & Test (JDK 21)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
@@ -20,12 +33,76 @@ jobs:
           distribution: 'temurin'
           cache: maven    # caches ~/.m2 between runs — speeds up subsequent builds significantly
 
-      - name: Build and test
-        run: mvn -B clean verify
-        # -B = batch mode (no interactive prompts, cleaner CI output)
-        # verify = compile + test + package (but not install to local repo)
-        # Testcontainers will pull Redis from Docker Hub automatically
+      # Testcontainers needs a real Docker daemon. GitHub-hosted `ubuntu-latest`
+      # runners ship with Docker Engine preinstalled and running, so no
+      # docker-in-docker service and no `services: redis:` block is required —
+      # Testcontainers starts and tears down its own Redis container.
+      # This step exists so a Docker-less runner (e.g. a self-hosted one) fails
+      # here with an obvious message instead of deep inside a Redis test.
+      - name: Verify Docker is available
+        run: |
+          if ! docker version; then
+            echo "::error::Docker daemon is not available on this runner. Testcontainers-based tests cannot run."
+            exit 1
+          fi
+          docker info
 
-      # Week 7: uncomment to build and push the Docker image
-      # - name: Build Docker image
-      #   run: docker build -t ghcr.io/${{ github.repository }}/flowgate-service:${{ github.sha }} ./service
+      # Fail fast on compile errors before spending time pulling Redis images.
+      - name: Compile (fail fast)
+        run: mvn -B -ntp clean compile
+
+      # Full reactor build: core -> library -> service, all tests included.
+      # Testcontainers pulls the Redis image from Docker Hub on first use.
+      #
+      # MODULE-NAME GOTCHA: directory names do NOT match artifactIds
+      #   core/      -> flowgate-core
+      #   library/   -> flowgate-library
+      #   service/   -> flowgate-service
+      #   benchmark/ -> flowgate-benchmark   (behind the `benchmarks` profile)
+      # So any `-pl` selection must use the colon-prefixed artifactId form, e.g.
+      #   mvn clean install -pl :flowgate-service -am
+      # `-pl service` will fail with "Could not find the selected project".
+      - name: Build and test (full reactor)
+        run: mvn -B -ntp verify
+        # -B    batch mode (no interactive prompts, cleaner CI output)
+        # -ntp  no transfer progress (kills the download-progress spam)
+        # verify = compile + test + package, without installing to the local repo
+
+      # Surefire writes to <module>/target/surefire-reports. There is no failsafe
+      # execution configured today (all tests are *Test, not *IT), so the failsafe
+      # glob is future-proofing — `if-no-files-found: ignore` keeps it quiet.
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            **/target/surefire-reports/**
+            **/target/failsafe-reports/**
+          if-no-files-found: ignore
+          retention-days: 7
+
+  benchmarks:
+    name: Compile benchmarks (JMH)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Cheap guard so the JMH sources can't rot silently. It does NOT run the
+    # benchmarks — it only proves they still compile and shade.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+
+      # `benchmark` is not in the default <modules> list — it lives in the
+      # `benchmarks` profile because the maven-shade-plugin JMH needs is slow.
+      # Selecting `:flowgate-benchmark -am` builds only parent + flowgate-core +
+      # flowgate-benchmark, skipping the service module (and its protobuf
+      # codegen) entirely. Tests are skipped, so no Docker is needed here.
+      - name: Package benchmarks
+        run: mvn -B -ntp -Pbenchmarks -pl :flowgate-benchmark -am -DskipTests package
